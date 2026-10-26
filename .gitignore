@@ -1,0 +1,7 @@
+build/
+livearea/*.png
+lib/vitagl/libvitaGL.a
+lib/vitagl/.flags
+lib/vitashark/libvitashark.a
+*.o
+*.d
