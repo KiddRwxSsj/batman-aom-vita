@@ -146,3 +146,7 @@ submodules. A few options that help when something breaks:
 * `bionic.c` gives every open of the OBB a virtual file handle, because the engine keeps one open
   per loaded package and the Vita runs out of real ones a few levels in.
 * `store.c` and `patch.c` hold the stamina and store changes.
+
+## Known issues
+
+- Updating from an older build: delete `ux0:data/batmanarkhamorigins/shader_cache` if the first boot crashes. The shaders are rebuilt on the next boot.
