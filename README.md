@@ -46,6 +46,19 @@ menu in about a minute. The intro movie at boot can be skipped with any button.
 
 Saves, settings and the log (`log.txt`) all go to `ux0:data/batmanarkhamorigins/`.
 
+### Check your files
+
+If you get a black screen that never ends, your files may be corrupted or from another version. Compare them with these:
+
+| File | Size (bytes) | SHA-256 |
+|------|--------------|---------|
+| `libUnrealEngine3.so` | 36099788 | `f27f19fb3c73093c625cad5522e8d4d23f35c346a75af9574d573c859fe7d55e` |
+| `main.3030.com.wb.goog.batman.brawler2013.obb` | 892333969 | `fa8738e24562856bd96559447dd70ae4d9e3a3b251c0deb8f2738ea8d46dcebd` |
+
+- Windows (PowerShell): `Get-FileHash -Algorithm SHA256 .\file`
+- Windows (CMD): `certutil -hashfile file SHA256`
+- Linux/Mac: `sha256sum file`
+
 ## Controls
 
 The game is touch only, so every button is turned into a touch. The touchscreen works as it is,
