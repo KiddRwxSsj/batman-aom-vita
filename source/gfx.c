@@ -204,36 +204,93 @@ static void nohalf_path(char *out, uint64_t hash) {
     sprintf(out, DATA_PATH "shader_cache/nohalf/%016llX", hash);
 }
 
-static int half_fallback(GLuint program) {
+// vertex shader sources stay around until their program links too, so the fallback can rebuild the
+// pair from fresh shader objects instead of re-sourcing the one that failed
+static struct { GLuint sh; char *src; } vert_src[MAX_HALF];
+static int vert_next;
+
+static void keep_vert_src(GLuint sh, const char *src) {
+    int slot = -1;
+    for (int i = 0; i < MAX_HALF && slot < 0; i++)
+        if (vert_src[i].src && vert_src[i].sh == sh)
+            slot = i;
+    for (int i = 0; i < MAX_HALF && slot < 0; i++)
+        if (!vert_src[i].src)
+            slot = i;
+    if (slot < 0)
+        slot = vert_next++ % MAX_HALF;
+    free(vert_src[slot].src);
+    vert_src[slot].sh = sh;
+    vert_src[slot].src = strdup(src);
+}
+
+static void attached(GLuint program, int *h, int *v) {
     GLuint sh[2];
     GLsizei n = 0;
-    int fixed = 0;
+    *h = *v = -1;
     glGetAttachedShaders(program, 2, &n, sh);
     for (int i = 0; i < n; i++)
-        for (int j = 0; j < MAX_HALF; j++)
-            if (half_src[j].orig && half_src[j].sh == sh[i]) {
-                char path[128];
-                nohalf_path(path, half_src[j].hash);
-                file_save(path, "", 0);
-                const GLchar *one = half_src[j].orig;
-                glShaderSource(sh[i], 1, &one, NULL);
-                free(half_src[j].orig);
-                half_src[j].orig = NULL;
-                fixed = 1;
-            }
-    return fixed;
+        for (int j = 0; j < MAX_HALF; j++) {
+            if (half_src[j].orig && half_src[j].sh == sh[i])
+                *h = j;
+            if (vert_src[j].src && vert_src[j].sh == sh[i])
+                *v = j;
+        }
+}
+
+static int half_fallback(GLuint program) {
+    int h, v;
+    attached(program, &h, &v);
+    if (h < 0)
+        return 0;
+    char path[128];
+    nohalf_path(path, half_src[h].hash);
+    file_save(path, "", 0);
+#ifdef DEBUG_SHOTS
+    mkpath(DATA_PATH "halffail/");
+    sprintf(path, DATA_PATH "halffail/p%u_f.glsl", program);
+    file_save(path, half_src[h].orig, strlen(half_src[h].orig));
+    if (v >= 0) {
+        sprintf(path, DATA_PATH "halffail/p%u_v.glsl", program);
+        file_save(path, vert_src[v].src, strlen(vert_src[v].src));
+    }
+#endif
+    const GLchar *one = half_src[h].orig;
+    if (v < 0) {
+        LOG("program %u: no vertex source kept, relinking in place", program);
+        glShaderSource(half_src[h].sh, 1, &one, NULL);
+    } else {
+        // fresh objects, the same path a later boot takes once the nohalf marker exists
+        GLuint nv = glCreateShader(GL_VERTEX_SHADER), nf = glCreateShader(GL_FRAGMENT_SHADER);
+        const GLchar *vs = vert_src[v].src;
+        glShaderSource(nv, 1, &vs, NULL);
+        glCompileShader(nv);
+        glShaderSource(nf, 1, &one, NULL);
+        glCompileShader(nf);
+        glAttachShader(program, nv);
+        glAttachShader(program, nf);
+        // the program holds them now, they go away with it
+        glDeleteShader(nv);
+        glDeleteShader(nf);
+        free(vert_src[v].src);
+        vert_src[v].src = NULL;
+    }
+    free(half_src[h].orig);
+    half_src[h].orig = NULL;
+    return 1;
 }
 
 static void half_done(GLuint program) {
-    GLuint sh[2];
-    GLsizei n = 0;
-    glGetAttachedShaders(program, 2, &n, sh);
-    for (int i = 0; i < n; i++)
-        for (int j = 0; j < MAX_HALF; j++)
-            if (half_src[j].orig && half_src[j].sh == sh[i]) {
-                free(half_src[j].orig);
-                half_src[j].orig = NULL;
-            }
+    int h, v;
+    attached(program, &h, &v);
+    if (h >= 0) {
+        free(half_src[h].orig);
+        half_src[h].orig = NULL;
+    }
+    if (v >= 0) {
+        free(vert_src[v].src);
+        vert_src[v].src = NULL;
+    }
 }
 
 // first boot compiles every shader through libshacccg, this shows it's still going
@@ -294,6 +351,7 @@ static char *patch_gfx_position(const char *src) {
 // ue3's distance field font shader calls smoothstep(0.5 - w, 0.5 + w, d) with w = 0. glsl leaves equal
 // edges undefined, android gpus treat it as a step, the vita returns 1 and every glyph is a solid box
 static const char safe_smoothstep[] =
+    "// vgl_ss 2\n" // changes the cache hash so old caches with these shaders get rebuilt
     "float vgl_ss(float a, float b, float x) { float d = b - a; d = abs(d) < 0.00001 ? 0.00001 : d;"
     " float t = clamp((x - a) / d, 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }\n"
     "vec2 vgl_ss(vec2 a, vec2 b, vec2 x) { return vec2(vgl_ss(a.x, b.x, x.x), vgl_ss(a.y, b.y, x.y)); }\n"
@@ -398,7 +456,9 @@ void gl_shader_source(GLuint sh, GLsizei n, const GLchar *const *str, const GLin
     uint64_t hash = src_hash(cur);
     char path[128];
     nohalf_path(path, hash);
-    if (!file_exists(path))
+    // distance field text (the only shaders with smoothstep) never goes half: the shadow/glow
+    // variants don't compile that way, and text gains nothing from it
+    if (!ss && !file_exists(path))
         hf = patch_half(cur);
     // remember the fp32 source in case the half one doesn't compile at link, no free slot = no half
     int slot = -1;
@@ -414,6 +474,10 @@ void gl_shader_source(GLuint sh, GLsizei n, const GLchar *const *str, const GLin
         free(hf);
         hf = NULL;
     }
+    GLint type = 0;
+    glGetShaderiv(sh, GL_SHADER_TYPE, &type);
+    if (type == GL_VERTEX_SHADER)
+        keep_vert_src(sh, cur);
     const GLchar *one = hf ? hf : cur;
     glShaderSource(sh, 1, &one, NULL);
     free(hf);

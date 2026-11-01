@@ -818,6 +818,7 @@ typedef struct {
 	uint16_t slot;
 	GLboolean dirty;
 	GLboolean is_glsl;
+	GLboolean glsl_origin; // created as a glsl shader, the translator clears is_glsl
 	binds_map semantics;
 #ifdef HAVE_GLSL_TEXTURE_SIZE
 	glsl_samplers_info sized_samplers[SCE_GXM_MAX_TEXTURE_UNITS];

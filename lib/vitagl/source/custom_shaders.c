@@ -1895,6 +1895,7 @@ GLuint glCreateShader(GLenum shaderType) {
 	default:
 		s->type = shaderType;
 		s->is_glsl = GL_TRUE;
+		s->glsl_origin = GL_TRUE;
 		break;
 	}
 
@@ -2016,6 +2017,10 @@ void glShaderSource(GLuint handle, GLsizei count, const GLchar *const *string, c
 
 	s->source[size] = 0;
 	s->size = size;
+	// new glsl source on an already translated shader (the port's fp32 relink) has to go
+	// through the translator again, it used to be compiled as cg or skipped entirely
+	if (s->glsl_origin && !s->prog)
+		s->is_glsl = GL_TRUE;
 }
 
 void glShaderBinary(GLsizei count, const GLuint *handles, GLenum binaryFormat, const void *binary, GLsizei length) {
@@ -2497,6 +2502,12 @@ void glLinkProgram(GLuint progr) {
 			p->glsl_attr_map = NULL;
 		}
 		glsl_sema_mode = VGL_MODE_POSTPONED;
+	}
+
+	// whatever path got here, gxm can't be handed a missing program
+	if (!p->vshader->prog || !p->fshader->prog) {
+		vgl_log("%s:%d: %s: %s shader is not compiled, program stays unlinked.\n", __FILE__, __LINE__, __func__, p->vshader->prog ? "fragment" : "vertex");
+		return;
 	}
 
 	if (p->status == PROG_LINKED) {

@@ -73,9 +73,12 @@ if(NOT "${VITAGL_OLD_FLAGS}" STREQUAL "${VITAGL_FLAGS}")
   execute_process(COMMAND make -C ${VITAGL_DIR} clean OUTPUT_QUIET)
   file(WRITE ${VITAGL_STAMP} "${VITAGL_FLAGS}")
 endif()
-# our patches live in the vitaGL sources too, so an edit there has to rebuild it
+# our patches live in the vitaGL sources too, so an edit there has to rebuild it. Always from clean:
+# its Makefile has no header dependencies, a struct change in shared.h once left stale objects
+# that disagreed on the shader struct layout (varying names shifted by a byte, menu text invisible)
 file(GLOB_RECURSE VITAGL_SOURCES CONFIGURE_DEPENDS ${VITAGL_DIR}/source/*.c ${VITAGL_DIR}/source/*.h ${VITAGL_DIR}/source/*.cpp)
 add_custom_command(OUTPUT ${VITAGL_LIB}
+  COMMAND make -C ${VITAGL_DIR} clean
   COMMAND make -C ${VITAGL_DIR} -j8 ${VITAGL_FLAGS}
   DEPENDS ${VITAGL_STAMP} ${VITAGL_SOURCES}
   COMMENT "Building vitaGL (softfp)")
